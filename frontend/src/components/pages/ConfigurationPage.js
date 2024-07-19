@@ -95,9 +95,36 @@ class ConfigurationPage extends Component {
         }
     };
 
+
     render() {
         const settings = this.state.settings;
         const curlCommand = createCurlCommand("/setup", "POST", settings);
+
+        fetch("/api/get_setup").
+        then(response => {
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
+        }
+        return response.json();
+        })
+        .then(data => {
+            const config = data.config;  
+
+            this.setState(
+                settings= {
+                    "config": {
+                        "server_address": config.server_address,
+                        "flag_regex": config.flag_regex,
+                        "auth_required": false
+                    },
+                    "accounts": settings.accounts
+                },
+            )
+        })
+        .catch(error => {
+            console.error('Fetch error:', error);
+        });
+
 
         const accounts = Object.entries(settings.accounts).map(([username, password]) =>
             <tr key={username}>
@@ -133,7 +160,7 @@ class ConfigurationPage extends Component {
                                 <Container className="p-0">
                                     <Row>
                                         <Col>
-                                            <InputField name="server_address" value={settings.config["server_address"]}
+                                            <InputField name="team_VM_address" value={settings.config["server_address"]}
                                                         error={this.state.serverAddressError}
                                                         onChange={(v) => this.updateParam((s) => s.config["server_address"] = v)}/>
                                             <InputField name="flag_regex" value={settings.config["flag_regex"]}

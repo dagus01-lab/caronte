@@ -31,6 +31,7 @@ import StatsPane from "../panels/StatsPane";
 import StreamsPane from "../panels/StreamsPane";
 import Timeline from "../Timeline";
 import "./MainPage.scss";
+import ConfigurationPage from "./ConfigurationPage";
 
 class MainPage extends Component {
 
@@ -72,6 +73,7 @@ class MainPage extends Component {
 
                         <ReflexElement className="pane details-pane">
                             <Switch>
+                                <Route path="/setup" children={<ConfigurationPage onConfigured={()=>{}}/>}/>
                                 <Route path="/searches" children={<SearchPane/>}/>
                                 <Route path="/pcaps" children={<PcapsPane/>}/>
                                 <Route path="/rules" children={<RulesPane/>}/>

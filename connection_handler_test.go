@@ -174,9 +174,9 @@ func TestConnectionFactory(t *testing.T) {
 	timeout := time.Tick(10 * time.Second)
 	for i := 0; i < n; i++ {
 		select {
-		case <- completed:
+		case <-completed:
 			continue
-		case <- timeout:
+		case <-timeout:
 			t.Fatal("timeout")
 		}
 	}
@@ -197,6 +197,10 @@ func (rm TestRulesManager) LoadRules() error {
 
 func (rm TestRulesManager) AddRule(_ context.Context, _ Rule) (RowID, error) {
 	return RowID{}, nil
+}
+
+func (rm TestRulesManager) DeleteRule(_ context.Context, _ RowID) error {
+	return nil
 }
 
 func (rm TestRulesManager) GetRule(_ RowID) (Rule, bool) {

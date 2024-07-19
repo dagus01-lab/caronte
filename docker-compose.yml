@@ -8,7 +8,8 @@ services:
     restart: unless-stopped
 
   caronte:
-    image: ghcr.io/eciavatta/caronte:latest
+    image: docker.io/dagus01lab/caronte:latest
+    build: .
     ports:
       - "3333:3333"
     environment:

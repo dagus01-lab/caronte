@@ -16,6 +16,8 @@ The connection flows are saved into a database and can be visualized with the we
 ## Features
 -   immediate installation with docker-compose
 -   no configuration file, settings can be changed via GUI or API
+-   caronte automatically listens for packets in/out from the services that have been added
+-   it is possible to download all the traffic captured by caronte into a .pcap file
 -   pcaps to be analyzed can be loaded via `curl`, either locally or remotely, or via the GUI
     -   it is also possible to download the pcaps from the GUI and see all the analysis statistics for each pcap
 -   rules can be created to identify connections that contain certain strings
@@ -38,6 +40,7 @@ The connection flows are saved into a database and can be visualized with the we
 -   occurrences of matched rules are highlighted in the connection content view
 -   supports both IPv4 and IPv6 addresses
     -   if more addresses are assigned to the vulnerable machine to be defended, a CIDR address can be used
+-   ability to edit the initial configuration without restarting caronte
 
 ## Installation
 There are two ways to install Caronte:
@@ -85,17 +88,18 @@ The backend, written in Go language, it is designed as a service. It exposes RES
 ## Screenshots
 Below there are some screenshots showing the main features of the tool.
 
-### Main window, with connections list and stream content
-![Connection Content](https://raw.githubusercontent.com/eciavatta/caronte/main/frontend/screenshots/main.png)
-
-### Main window, with the timeline expanded
-![Connection Content](https://raw.githubusercontent.com/eciavatta/caronte/main/frontend/screenshots/main2.png)
+### Main window, with connections list and stream content and searches and configuration page
+![Web interface](frontend/screenshots/searches.jpg)
+![Web interface](frontend/screenshots/caronte_config.jpg)
 
 ### Rules and services view
-![Connection Content](https://raw.githubusercontent.com/eciavatta/caronte/main/frontend/screenshots/rules_services.png)
+![Web interface](frontend/screenshots/rules.jpg)
+![Web interface](frontend/screenshots/services.jpg)
 
-### Searches and pcaps view
-![Connection Content](https://raw.githubusercontent.com/eciavatta/caronte/main/frontend/screenshots/searches_pcaps.png)
+
+### Statistics and pcaps view
+![Web interface](frontend/screenshots/statistics.jpg)
+![Web interface](frontend/screenshots/pcaps.jpg)
 
 ## License
 caronte was created by [Emiliano Ciavatta](https://eciavatta.dev) and is licensed under the [GPL-3.0 license](LICENSE).

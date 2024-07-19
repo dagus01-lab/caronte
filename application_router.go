@@ -47,10 +47,6 @@ func CreateApplicationRouter(applicationContext *ApplicationContext,
 	}
 
 	router.POST("/setup", func(c *gin.Context) {
-		if applicationContext.IsConfigured {
-			c.AbortWithStatus(http.StatusNotFound)
-			return
-		}
 
 		var settings struct {
 			Config   Config       `json:"config" binding:"required"`
@@ -79,6 +75,12 @@ func CreateApplicationRouter(applicationContext *ApplicationContext,
 	api.Use(SetupRequiredMiddleware(applicationContext))
 	api.Use(AuthRequiredMiddleware(applicationContext))
 	{
+		api.GET("/get_setup", func(c *gin.Context) {
+
+			config := applicationContext.GetConfig()
+			success(c, config)
+
+		})
 		api.GET("/rules", func(c *gin.Context) {
 			success(c, applicationContext.RulesManager.GetRules())
 		})
@@ -112,6 +114,23 @@ func CreateApplicationRouter(applicationContext *ApplicationContext,
 				notFound(c, UnorderedDocument{"id": id})
 			} else {
 				success(c, rule)
+			}
+		})
+
+		api.DELETE("/rules/:id", func(c *gin.Context) {
+			hex := c.Param("id")
+			id, err := RowIDFromHex(hex)
+			if err != nil {
+				badRequest(c, err)
+				return
+			}
+
+			err = applicationContext.RulesManager.DeleteRule(c, id)
+			if err != nil {
+				notFound(c, UnorderedDocument{"id": id})
+			} else {
+				success(c, UnorderedDocument{})
+				notificationController.Notify("rules.delete", UnorderedDocument{"id": id})
 			}
 		})
 
@@ -216,7 +235,8 @@ func CreateApplicationRouter(applicationContext *ApplicationContext,
 				} else if FileExists(PcapsBasePath + sessionID + ".pcapng") {
 					c.FileAttachment(PcapsBasePath+sessionID+".pcapng", sessionID[:16]+".pcapng")
 				} else {
-					log.WithField("sessionID", sessionID).Panic("pcap file not exists")
+					log.WithField("sessionID", sessionID).Warn("requested pcap file not found")
+					notFound(c, gin.H{"session": sessionID})
 				}
 			} else {
 				notFound(c, gin.H{"session": sessionID})
@@ -231,6 +251,24 @@ func CreateApplicationRouter(applicationContext *ApplicationContext,
 				notificationController.Notify("sessions.delete", session)
 			} else {
 				notFound(c, session)
+			}
+		})
+
+		api.POST("/download_traffic", func(c *gin.Context) {
+			var request struct {
+				FileName string `json:"fileName"`
+			}
+
+			if err := c.ShouldBindJSON(&request); err != nil {
+				badRequest(c, err)
+				return
+			}
+			fileName := request.FileName
+
+			if err := applicationContext.PcapImporter.exportPcap(fileName); err != nil {
+				serverError(c, err)
+			} else {
+				success(c, fileName)
 			}
 		})
 
@@ -431,6 +469,7 @@ func CreateApplicationRouter(applicationContext *ApplicationContext,
 		api.GET("/resources/process", func(c *gin.Context) {
 			success(c, resourcesController.GetProcessStats(c))
 		})
+
 	}
 
 	return router

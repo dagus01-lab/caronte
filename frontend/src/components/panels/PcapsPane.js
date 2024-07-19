@@ -33,6 +33,9 @@ class PcapsPane extends Component {
 
     state = {
         sessions: [],
+        isDownloadFileValid: true,
+        isDownloadFileFocused: false,
+        downloadSelectedFile: "",
         isUploadFileValid: true,
         isUploadFileFocused: false,
         uploadFlushAll: false,
@@ -115,6 +118,14 @@ class PcapsPane extends Component {
         );
     };
 
+    resetDownload = () => {
+        this.setState({
+            isDownloadFileValid: true,
+            isDownloadFileFocused: false,
+            downloadSelectedFile: ""
+        })
+    }
+
     resetUpload = () => {
         this.setState({
             isUploadFileValid: true,
@@ -133,6 +144,28 @@ class PcapsPane extends Component {
             deleteOriginalFile: false,
         });
     };
+
+    downloadTraffic = () => {
+
+        if (this.state.downloadSelectedFile === "" || !this.state.isFileValid) {
+            this.setState({isDownloadFileFocused: true});
+            return;
+        }
+
+        backend.post("/api/download_traffic", {
+            "fileName": this.state.downloadSelectedFile
+        }).then((res) => {
+            this.setState({
+                processStatusCode: res.status,
+                processResponse: JSON.stringify(res.json)
+            });
+            this.resetDownload();
+        }).catch((res) => this.setState({
+                processStatusCode: res.status,
+                processResponse: JSON.stringify(res.json)
+            })
+        );
+    }
 
     render() {
         let sessions = this.state.sessions.map((s) => {
@@ -159,6 +192,16 @@ class PcapsPane extends Component {
                 </td>
             </tr>;
         });
+
+        const handleDownloadFileChange = (file) => {
+            this.setState({
+                isDownloadFileValid: (file.endsWith("pcap") || file.endsWith("pcapng")),
+                isDownloadFileFocused: false,
+                downloadSelectedFile: file,
+                downloadStatusCode: null,
+                downloadResponse: null
+            });
+        }
 
         const handleUploadFileChange = (file) => {
             this.setState({
@@ -226,6 +269,27 @@ class PcapsPane extends Component {
                 </div>
 
                 <div className="double-pane-container">
+                    <div className="pane-section">
+                        <div className="section-header">
+                            <span className="api-request">POST /api/download_traffic</span>
+                            <span className="api-response"><LinkPopover text={this.state.uploadStatusCode}
+                                                                        content={this.state.uploadResponse}
+                                                                        placement="left"/></span>
+                        </div>
+
+                        <div className="section-content">
+                            <InputField name={"file"} invalid={!this.state.isDownloadFileValid}
+                                        active={this.state.isDownloadFileFocused}
+                                        onChange={handleDownloadFileChange} value={this.state.downloadSelectedFile}
+                                        placeholder={"no .pcap[ng] selected"} inline/>
+                            <div className="upload-actions">
+                                <ButtonField variant="green" bordered onClick={this.downloadTraffic} name="download"/>
+                            </div>
+
+                            <TextField value={uploadCurlCommand} rows={4} readonly small={true}/>
+                        </div>
+                    </div>
+
                     <div className="pane-section">
                         <div className="section-header">
                             <span className="api-request">POST /api/pcap/upload</span>

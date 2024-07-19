@@ -1,5 +1,5 @@
 # Build backend with go
-FROM golang:1.16 AS BACKEND_BUILDER
+FROM golang:1.20 AS BACKEND_BUILDER
 
 # Install tools and libraries
 RUN apt-get update && \
@@ -13,8 +13,9 @@ WORKDIR /caronte
 
 COPY . ./
 
+RUN go mod download
+
 RUN export VERSION=$(git describe --tags --abbrev=0) && \
-    go mod download && \
     go build -ldflags "-X main.Version=$VERSION" && \
 	mkdir -p build && \
 	cp -r caronte pcaps/ scripts/ shared/ test_data/ build/
@@ -23,11 +24,17 @@ RUN export VERSION=$(git describe --tags --abbrev=0) && \
 # Build frontend via yarn
 FROM node:16 as FRONTEND_BUILDER
 
+ENV PNPM_VERSION 8.3.1
+RUN npm install -g pnpm@${PNPM_VERSION}
 WORKDIR /caronte-frontend
 
-COPY ./frontend ./
+# pnpm fetch does require only lockfile
+COPY ./frontend/pnpm-lock.yaml ./
+RUN pnpm fetch --prod
 
-RUN yarn install && yarn build --production=true
+
+COPY ./frontend ./
+RUN pnpm install && pnpm build
 
 
 # LAST STAGE

@@ -3,3 +3,5 @@ pcaps/*.pcap
 pcaps/*.pcapng
 pcaps/processing/*.pcap
 pcaps/processing/*.pcapng
+
+frontend/node_modules/

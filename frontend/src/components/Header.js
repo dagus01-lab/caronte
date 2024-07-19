@@ -88,6 +88,9 @@ class Header extends Component {
                             <Link to={"/stats" + this.props.location.search}>
                                 <ButtonField variant="blue" name="stats" bordered/>
                             </Link>
+                            <Link to={"/setup" + this.props.location.search}>
+                                <ButtonField variant="green" name="setup" bordered/>
+                            </Link>
                         </div>
                     }
                 </div>

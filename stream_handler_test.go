@@ -19,15 +19,16 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"net"
+	"testing"
+	"time"
+
 	"github.com/flier/gohs/hyperscan"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"math/rand"
-	"net"
-	"testing"
-	"time"
 )
 
 const testSrcIP = "10.10.10.100"

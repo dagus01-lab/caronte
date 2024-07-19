@@ -21,10 +21,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/eciavatta/caronte/parsers"
-	log "github.com/sirupsen/logrus"
 	"strings"
 	"time"
+
+	"github.com/eciavatta/caronte/parsers"
+	log "github.com/sirupsen/logrus"
 )
 
 const (

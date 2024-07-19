@@ -20,9 +20,9 @@ jobs:
         ports:
           - 27017:27017
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v4
         with:
           go-version: 1.16
       - name: Install dependencies
@@ -38,9 +38,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Set up Node.js
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
         with:
           node-version: 14.x
       - name: Install dependencies
@@ -53,7 +53,7 @@ jobs:
     env:
       COMPOSE_FILE: .github/docker/docker-compose.yml
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Pull docker images
         run: docker-compose pull mongo
       - name: Build docker backend

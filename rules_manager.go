@@ -83,6 +83,7 @@ type RulesManager interface {
 	AddRule(context context.Context, rule Rule) (RowID, error)
 	GetRule(id RowID) (Rule, bool)
 	UpdateRule(context context.Context, id RowID, rule Rule) (bool, error)
+	DeleteRule(context context.Context, id RowID) error
 	GetRules() []Rule
 	FillWithMatchedRules(connection *Connection, clientMatches map[uint][]PatternSlice, serverMatches map[uint][]PatternSlice)
 	DatabaseUpdateChannel() chan RulesDatabase
@@ -207,6 +208,21 @@ func (rm *rulesManagerImpl) UpdateRule(context context.Context, id RowID, rule R
 	}
 
 	return updated, nil
+}
+
+func (rm *rulesManagerImpl) DeleteRule(context context.Context, id RowID) error {
+	err := rm.storage.Delete(Rules).Context(context).Filter(OrderedDocument{{"_id", id}}).One()
+	if err != nil {
+		log.WithError(err).WithField("id", id).Panic("failed to delete rule on database")
+	} else {
+		rm.mutex.Lock()
+		rule := rm.rules[id]
+		delete(rm.rules, id)
+		delete(rm.rulesByName, rule.Name)
+		rm.mutex.Unlock()
+	}
+
+	return err
 }
 
 func (rm *rulesManagerImpl) GetRules() []Rule {

@@ -19,6 +19,7 @@ package main
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/google/gopacket"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -48,7 +49,7 @@ func CreateApplicationContext(storage Storage, version string) (*ApplicationCont
 	var configWrapper struct {
 		Config Config
 	}
-	if err := storage.Find(Settings).Filter(OrderedDocument{{"_id", "config"}}).
+	if err := storage.Find(Settings).Filter(OrderedDocument{{Key: "_id", Value: "config"}}).
 		First(&configWrapper); err != nil {
 		return nil, err
 	}
@@ -56,7 +57,7 @@ func CreateApplicationContext(storage Storage, version string) (*ApplicationCont
 		Accounts gin.Accounts
 	}
 
-	if err := storage.Find(Settings).Filter(OrderedDocument{{"_id", "accounts"}}).
+	if err := storage.Find(Settings).Filter(OrderedDocument{{Key: "_id", Value: "accounts"}}).
 		First(&accountsWrapper); err != nil {
 		return nil, err
 	}
@@ -65,13 +66,27 @@ func CreateApplicationContext(storage Storage, version string) (*ApplicationCont
 	}
 
 	applicationContext := &ApplicationContext{
-		Storage:                storage,
-		Config:                 configWrapper.Config,
-		Accounts:               accountsWrapper.Accounts,
-		Version:                version,
+		Storage:  storage,
+		Config:   configWrapper.Config,
+		Accounts: accountsWrapper.Accounts,
+		Version:  version,
 	}
 
 	return applicationContext, nil
+}
+
+func (sm *ApplicationContext) GetConfig() Config {
+
+	var config []Config
+	if err := sm.Storage.Find(Settings).All(&config); err != nil {
+		log.WithError(err).WithField("config", config).Error("failed to get config")
+		return Config{
+			ServerAddress: "",
+			FlagRegex:     "",
+			AuthRequired:  true,
+		}
+	}
+	return config[0]
 }
 
 func (sm *ApplicationContext) SetConfig(config Config) {
@@ -79,7 +94,7 @@ func (sm *ApplicationContext) SetConfig(config Config) {
 	sm.Configure()
 	var upsertResults interface{}
 	if _, err := sm.Storage.Update(Settings).Upsert(&upsertResults).
-		Filter(OrderedDocument{{"_id", "config"}}).One(UnorderedDocument{"config": config}); err != nil {
+		Filter(OrderedDocument{{Key: "_id", Value: "config"}}).One(UnorderedDocument{"config": config}); err != nil {
 		log.WithError(err).WithField("config", config).Error("failed to update config")
 	}
 }
@@ -88,7 +103,7 @@ func (sm *ApplicationContext) SetAccounts(accounts gin.Accounts) {
 	sm.Accounts = accounts
 	var upsertResults interface{}
 	if _, err := sm.Storage.Update(Settings).Upsert(&upsertResults).
-		Filter(OrderedDocument{{"_id", "accounts"}}).One(UnorderedDocument{"accounts": accounts}); err != nil {
+		Filter(OrderedDocument{{Key: "_id", Value: "accounts"}}).One(UnorderedDocument{"accounts": accounts}); err != nil {
 		log.WithError(err).Error("failed to update accounts")
 	}
 }
@@ -113,9 +128,13 @@ func (sm *ApplicationContext) Configure() {
 	if err != nil {
 		log.WithError(err).Panic("failed to create a RulesManager")
 	}
+
+	maxNumPkts := 1000
+	capturedPacketsChannel := make(chan gopacket.Packet, maxNumPkts)
+
 	sm.RulesManager = rulesManager
-	sm.PcapImporter = NewPcapImporter(sm.Storage, *serverNet, sm.RulesManager, sm.NotificationController)
-	sm.ServicesController = NewServicesController(sm.Storage)
+	sm.PcapImporter = NewPcapImporter(sm.Storage, *serverNet, sm.RulesManager, sm.NotificationController, capturedPacketsChannel)
+	sm.ServicesController = NewServicesController(sm.Storage, capturedPacketsChannel)
 	sm.SearchController = NewSearchController(sm.Storage)
 	sm.ConnectionsController = NewConnectionsController(sm.Storage, sm.SearchController, sm.ServicesController)
 	sm.ConnectionStreamsController = NewConnectionStreamsController(sm.Storage)

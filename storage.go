@@ -39,6 +39,7 @@ const (
 	Settings          = "settings"
 	Services          = "services"
 	Statistics        = "statistics"
+	CapturedPackets   = "packets"
 )
 
 var ZeroRowID [12]byte
@@ -83,6 +84,7 @@ func NewMongoStorage(uri string, port int, database string) (*MongoStorage, erro
 		Settings:          db.Collection(Settings),
 		Services:          db.Collection(Services),
 		Statistics:        db.Collection(Statistics),
+		CapturedPackets:   db.Collection(CapturedPackets),
 	}
 
 	if _, err := collections[Services].Indexes().CreateOne(ctx, mongo.IndexModel{

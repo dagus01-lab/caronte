@@ -22,6 +22,8 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/eciavatta/caronte/packet_sniffer"
+	"github.com/google/gopacket"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -33,12 +35,14 @@ type Service struct {
 }
 
 type ServicesController struct {
-	storage  Storage
-	services map[uint16]Service
-	mutex    sync.Mutex
+	storage        Storage
+	services       map[uint16]Service
+	captureChannel chan gopacket.Packet
+	Sensor         *packet_sniffer.Sensor
+	mutex          sync.Mutex
 }
 
-func NewServicesController(storage Storage) *ServicesController {
+func NewServicesController(storage Storage, captureChannel chan gopacket.Packet) *ServicesController {
 	var result []Service
 	if err := storage.Find(Services).All(&result); err != nil {
 		log.WithError(err).Panic("failed to retrieve services")
@@ -46,14 +50,24 @@ func NewServicesController(storage Storage) *ServicesController {
 	}
 
 	services := make(map[uint16]Service, len(result))
+	sensor, err := packet_sniffer.CreateNewSensor(captureChannel)
+
 	for _, service := range result {
 		services[service.Port] = service
+		sensor.AddPort(int(service.Port))
 	}
+	if err != nil {
+		log.WithError(err)
+	}
+	go sensor.Run()
 
-	return &ServicesController{
-		storage:  storage,
-		services: services,
+	servicesController := ServicesController{
+		storage:        storage,
+		services:       services,
+		captureChannel: captureChannel,
+		Sensor:         sensor,
 	}
+	return &servicesController
 }
 
 func (sc *ServicesController) SetService(c context.Context, service Service) error {
@@ -63,10 +77,12 @@ func (sc *ServicesController) SetService(c context.Context, service Service) err
 	updated, err := sc.storage.Update(Services).Context(c).Filter(OrderedDocument{{"_id", service.Port}}).
 		Upsert(&upsert).One(service)
 	if err != nil {
-		return errors.New("duplicate name")
+		return err
 	}
+
 	if updated || upsert != nil {
 		sc.services[service.Port] = service
+		sc.Sensor.AddPort(int(service.Port))
 	}
 	return nil
 }
@@ -84,6 +100,8 @@ func (sc *ServicesController) GetServices() map[uint16]Service {
 func (sc *ServicesController) DeleteService(c context.Context, service Service) error {
 	sc.mutex.Lock()
 	defer sc.mutex.Unlock()
+
+	sc.Sensor.DeletePort(int(service.Port))
 
 	if err := sc.storage.Delete(Services).Context(c).Filter(OrderedDocument{{"_id", service.Port}}).
 		One(); err != nil {

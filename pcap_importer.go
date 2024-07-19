@@ -20,24 +20,30 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
-	"github.com/google/gopacket/tcpassembly"
-	log "github.com/sirupsen/logrus"
 	"net"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/pcapgo"
+	"github.com/google/gopacket/tcpassembly"
+	log "github.com/sirupsen/logrus"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 const PcapsBasePath = "pcaps/"
 const ProcessingPcapsBasePath = PcapsBasePath + "processing/"
 const initialAssemblerPoolSize = 16
 const importUpdateProgressInterval = 100 * time.Millisecond
+const MAX_PCAPS = 100
+const maxPacketLifeTime = 30 * time.Minute
 
 type PcapImporter struct {
 	storage                Storage
@@ -48,6 +54,7 @@ type PcapImporter struct {
 	mSessions              sync.Mutex
 	serverNet              net.IPNet
 	notificationController *NotificationController
+	capturedPacketsChannel chan gopacket.Packet
 }
 
 type ImportingSession struct {
@@ -63,10 +70,30 @@ type ImportingSession struct {
 	completed         chan string
 }
 
+type PacketData struct {
+	RawData   []byte    `json:"raw_data" bson:"raw_data"`
+	TimeStamp time.Time `json:"timestamp" bson:"timestamp"`
+}
+
 type flowCount [2]int
 
+// Serialize a gopacket.Packet into a byte slice
+func serializePacket(packet gopacket.Packet) ([]byte, error) {
+	buffer := gopacket.NewSerializeBuffer()
+	if err := gopacket.SerializePacket(buffer, gopacket.SerializeOptions{}, packet); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+// Deserialize a byte slice into a gopacket.Packet.
+func deserializePacket(data []byte) (gopacket.Packet, error) {
+	packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
+	return packet, nil
+}
+
 func NewPcapImporter(storage Storage, serverNet net.IPNet, rulesManager RulesManager,
-	notificationController *NotificationController) *PcapImporter {
+	notificationController *NotificationController, capturedPacketsChannel chan gopacket.Packet) *PcapImporter {
 	streamPool := tcpassembly.NewStreamPool(NewBiDirectionalStreamFactory(storage, serverNet, rulesManager))
 
 	var result []ImportingSession
@@ -78,7 +105,7 @@ func NewPcapImporter(storage Storage, serverNet net.IPNet, rulesManager RulesMan
 		sessions[session.ID] = session
 	}
 
-	return &PcapImporter{
+	pcapImporter := PcapImporter{
 		storage:                storage,
 		streamPool:             streamPool,
 		assemblers:             make([]*tcpassembly.Assembler, 0, initialAssemblerPoolSize),
@@ -87,7 +114,65 @@ func NewPcapImporter(storage Storage, serverNet net.IPNet, rulesManager RulesMan
 		mSessions:              sync.Mutex{},
 		serverNet:              serverNet,
 		notificationController: notificationController,
+		capturedPacketsChannel: capturedPacketsChannel,
 	}
+	go pcapImporter.StoreIncomingTraffic()
+	go pcapImporter.DeleteOldPackets()
+	return &pcapImporter
+}
+
+func (pi *PcapImporter) StoreIncomingTraffic() {
+	for {
+		incomingPacket := <-pi.capturedPacketsChannel
+		if err := pi.ImportPacket(incomingPacket); err != nil {
+			log.WithError(err).WithField("captured packet", incomingPacket).Error("failed to insert captured packet")
+		}
+	}
+}
+
+func (pi *PcapImporter) DeleteOldPackets() {
+	for {
+		minTimeToLivePackets := time.Now().Add(-maxPacketLifeTime)
+
+		var packets []PacketData
+
+		err := pi.storage.Find(CapturedPackets).All(&packets)
+		if err != nil {
+			log.Println("Error on reading old packets on database: ", err)
+		}
+
+		log.Println("Removing old packets from database, now there are " + strconv.Itoa(len(packets)))
+		filter := bson.D{
+			{"timestamp", bson.D{
+				{"$lt", minTimeToLivePackets},
+			}},
+		}
+		pi.storage.Delete(CapturedPackets).Filter(filter).Many()
+
+		pi.storage.Find(CapturedPackets).All(&packets)
+		log.Println("Removed old packets from database, now there are " + strconv.Itoa(len(packets)))
+
+		time.Sleep(maxPacketLifeTime)
+	}
+}
+
+// Import a captured packet to the database and update the tcp connection stream flows
+func (pi *PcapImporter) ImportPacket(packet gopacket.Packet) error {
+	assembler := pi.takeAssembler()
+	serializedPacket, err := serializePacket(packet)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if _, err := pi.storage.Insert(CapturedPackets).One(PacketData{RawData: serializedPacket, TimeStamp: time.Now()}); err != nil {
+		return err
+	}
+
+	tcp, ok := packet.TransportLayer().(*layers.TCP)
+	if ok {
+		assembler.Assemble(packet.NetworkLayer().NetworkFlow(), tcp)
+	}
+	return nil
 }
 
 // Import a pcap file to the database. The pcap file must be present at the fileName path. If the pcap is already
@@ -176,7 +261,7 @@ func (pi *PcapImporter) FlushConnections(olderThen time.Time, closeAll bool) (fl
 
 // Read the pcap and save the tcp stream flow to the database
 func (pi *PcapImporter) parsePcap(session ImportingSession, fileName string, flushAll bool, ctx context.Context) {
-	handle, err := pcap.OpenOffline(ProcessingPcapsBasePath + fileName)
+	pcapHandle, err := pcap.OpenOffline(ProcessingPcapsBasePath + fileName)
 	if err != nil {
 		pi.progressUpdate(session, fileName, false, "failed to process pcap")
 		log.WithError(err).WithFields(log.Fields{"session": session, "fileName": fileName}).
@@ -184,7 +269,7 @@ func (pi *PcapImporter) parsePcap(session ImportingSession, fileName string, flu
 		return
 	}
 
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	packetSource := gopacket.NewPacketSource(pcapHandle, pcapHandle.LinkType())
 	packetSource.NoCopy = true
 	assembler := pi.takeAssembler()
 	packets := packetSource.Packets()
@@ -193,7 +278,7 @@ func (pi *PcapImporter) parsePcap(session ImportingSession, fileName string, flu
 	for {
 		select {
 		case <-ctx.Done():
-			handle.Close()
+			pcapHandle.Close()
 			pi.releaseAssembler(assembler)
 			pi.progressUpdate(session, fileName, false, "import process cancelled")
 			return
@@ -202,12 +287,15 @@ func (pi *PcapImporter) parsePcap(session ImportingSession, fileName string, flu
 
 		select {
 		case packet := <-packets:
-			if packet == nil { // completed
+
+			if packet == nil {
+				// we read all the packets
 				if flushAll {
 					connectionsClosed := assembler.FlushAll()
 					log.Debugf("connections closed after flush: %v", connectionsClosed)
 				}
-				handle.Close()
+				pcapHandle.Close()
+				pi.tryDeleteOldPcaps()
 				pi.releaseAssembler(assembler)
 				pi.progressUpdate(session, fileName, true, "")
 				pi.notificationController.Notify("pcap.completed", session)
@@ -217,8 +305,16 @@ func (pi *PcapImporter) parsePcap(session ImportingSession, fileName string, flu
 
 			session.ProcessedPackets++
 
-			if packet.NetworkLayer() == nil || packet.TransportLayer() == nil ||
-				packet.TransportLayer().LayerType() != layers.LayerTypeTCP { // invalid packet
+			if packet.NetworkLayer() == nil {
+				log.Warn("Invalid packet: no network layer")
+				session.InvalidPackets++
+				continue
+			} else if packet.TransportLayer() == nil {
+				log.Warn("Invalid packet: no transport layer")
+				session.InvalidPackets++
+				continue
+			} else if packet.TransportLayer().LayerType() != layers.LayerTypeTCP {
+				log.Warn("Invalid packet: no network or transport layer")
 				session.InvalidPackets++
 				continue
 			}
@@ -236,6 +332,7 @@ func (pi *PcapImporter) parsePcap(session ImportingSession, fileName string, flu
 				servicePort = uint16(tcp.SrcPort)
 				index = 1
 			} else {
+				log.Warn("Invalid packet: source and destination are the same")
 				session.InvalidPackets++
 				continue
 			}
@@ -250,6 +347,17 @@ func (pi *PcapImporter) parsePcap(session ImportingSession, fileName string, flu
 		case <-updateProgressInterval:
 			pi.progressUpdate(session, fileName, false, "")
 		}
+	}
+}
+
+func (pi *PcapImporter) tryDeleteOldPcaps() {
+	sessions := pi.GetSessions()
+	size := len(sessions)
+
+	if size > MAX_PCAPS {
+		hash := sessions[0].ID
+		// delete the oldest session pcap file
+		deletePcapFile(hash)
 	}
 }
 
@@ -304,13 +412,67 @@ func (pi *PcapImporter) releaseAssembler(assembler *tcpassembly.Assembler) {
 }
 
 func deleteProcessingFile(fileName string) {
-	if err := os.Remove(ProcessingPcapsBasePath + fileName); err != nil {
+	err := os.Remove(ProcessingPcapsBasePath + fileName)
+	if err != nil {
 		log.WithError(err).Error("failed to delete processing file")
 	}
 }
 
-func moveProcessingFile(sessionID string, fileName string) {
-	if err := os.Rename(ProcessingPcapsBasePath+fileName, PcapsBasePath+sessionID+path.Ext(fileName)); err != nil {
+func deletePcapFile(fileName string) {
+	err := os.Remove(PcapsBasePath + fileName)
+	if err != nil {
+		log.WithError(err).Error("failed to delete pcap file")
+	}
+}
+
+func moveProcessingFile(sessionID string, oldFileName string) {
+	oldExt := path.Ext(oldFileName)
+	oldpath := ProcessingPcapsBasePath + oldFileName
+	newpath := PcapsBasePath + sessionID + oldExt
+
+	err := os.Rename(oldpath, newpath)
+	if err != nil {
 		log.WithError(err).Error("failed to move processed file")
 	}
+}
+
+func (pi *PcapImporter) exportPcap(fileName string) error {
+	log.Println(fileName)
+	pcapFile, err := os.Create(fileName)
+	if err != nil {
+		return err
+	}
+	defer pcapFile.Close()
+
+	// Create a PCAP writer
+	pcapWriter := pcapgo.NewWriter(pcapFile)
+	pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet)
+
+	var packets []PacketData
+	err = pi.storage.Find(CapturedPackets).All(&packets)
+	if err != nil {
+		return err
+	}
+	for _, packet := range packets {
+		// Deserialize packet data from MongoDB
+		deserializedPacket, err := deserializePacket(packet.RawData)
+		if err != nil {
+			return err
+		}
+
+		// Serialize and write the packet to the PCAP file
+		serializedPacket, err := serializePacket(deserializedPacket)
+		if err != nil {
+			return err
+		}
+
+		if err := pcapWriter.WritePacket(gopacket.CaptureInfo{
+			Timestamp:     time.Now(),
+			CaptureLength: len(serializedPacket),
+			Length:        len(serializedPacket),
+		}, serializedPacket); err != nil {
+			return err
+		}
+	}
+	return nil
 }

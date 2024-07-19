@@ -13,7 +13,7 @@ function setup_service(){
 BACKEND=false
 FRONTEND=false
 SETUP=true
-IMPORT=true
+IMPORT=false
 START=false
 
 
@@ -45,7 +45,7 @@ if $SETUP ; then
 		http://localhost:3333/setup
 
 	setup_service 8080  crashair        E53935
-	setup_service 27017 aircnc          5E35B1
+#	setup_service 27017 aircnc          5E35B1
 	setup_service 80    lostpropertyhub F9A825
 	setup_service 5555  theone 	    F9A435
 	#setup_service 3306  crashair        E53935
@@ -54,7 +54,7 @@ fi
 
 # import pcaps
 if $IMPORT ; then
-	PCAP_DIR="~/pcaps"
+	PCAP_DIR="../test_data"
 	for PCAP in $PCAP_DIR/*.pcap ; do
 		echo "[+] Uploading $PCAP" && \
 		curl -F "file=@$PCAP" "http://localhost:3333/api/pcap/upload"
